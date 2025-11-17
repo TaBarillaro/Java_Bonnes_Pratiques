@@ -2,89 +2,115 @@ package org.example;
 
 import java.io.*;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import org.apache.commons.io.IOUtils;
-import com.google.gson.Gson;
 
+// client TCP pour la communication avec le serveur
+// il gère la connexion, l'envoie et le reception des messages
 public class Client {
-    private String adr;
-    private int p;
-    private Socket s;
-    private ExecutorService exec;
-    private BufferedReader lecteurConsole;
+    private static final int DEFAULT_SOCKET_TIMEOUT_MS = 5000;
+    private static final int MAX_MESSAGE_LENGTH = 1024;
+    private static final int THREAD_POOL_SIZE = 2;
+    private static final int CONNECTION_DELAY_MS = 100;
+
+    private String serverAddress;
+    private int serverPort;
+    private Socket clientSocket;
+    private ExecutorService executorService;
+    private BufferedReader consoleReader;
     private int messageCount = 0;
 
     public Client(String serverAddress, int serverPort) {
-        this.adr = serverAddress;
-        this.p = serverPort;
+        this.serverAddress = serverAddress;
+        this.serverPort = serverPort;
     }
 
-    // méthode pour se connecter
-    public void Connect() throws IOException, InterruptedException, ExecutionException {
-        s = new Socket(adr, p);
-        exec = Executors.newFixedThreadPool(2);
+    // méthode pour se connecter au serveur
+    public void connect() throws IOException, InterruptedException, ExecutionException {
+        clientSocket = new Socket(serverAddress, serverPort);
+        clientSocket.setSoTimeout(DEFAULT_SOCKET_TIMEOUT_MS);
+        executorService = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
 
-        Future<?> t1 = exec.submit(this::receiveMessages);
-        Thread.sleep(100);
-        Future<?> t2 = exec.submit(this::sendMessages);
+        Future<?> receiveTask  = executorService.submit(this::receiveMessages);
+        Thread.sleep(CONNECTION_DELAY_MS);
+        Future<?> sendTask  = executorService.submit(this::sendMessages);
 
-        t1.get();
-        t2.get();
+        receiveTask.get();
+        sendTask.get();
 
         shutdown();
     }
 
-    // reception des messages
+    // reception des messages depuis le serveur et stamp
     private void receiveMessages() {
         try {
-            InputStream inputStream = s.getInputStream();
-            InputStreamReader isr = new InputStreamReader(inputStream);
-            BufferedReader r = new BufferedReader(isr);
-            String msg;
-            while ((msg = r.readLine()) != null) {
-                System.out.println("\r" + msg);
+            InputStream inputStream = clientSocket.getInputStream();
+            InputStreamReader inputStreamReader = new InputStreamReader(inputStream);
+            BufferedReader reader = new BufferedReader(inputStreamReader);
+            String message;
+            while ((message = reader.readLine()) != null) {
+                if (message.length() > MAX_MESSAGE_LENGTH) {
+                    System.err.println("Message trop long, ignoré.");
+                    continue;
+                }
+                System.out.println("\r" + message);
                 System.out.print("You: ");
             }
+        } catch (SocketTimeoutException e) {
+            System.err.println("Socket timed out.");
         } catch (IOException e) {
-            System.out.println("Disconnected");
+            System.err.println("Déconnexion du serveur: " + e.getMessage());
+            throw new RuntimeException("Erreur de réception des messages", e);
+        } finally {
+            try {
+                clientSocket.close();
+            } catch (IOException e) {
+                System.err.println("Erreur de socket close: " + e.getMessage());
+            }
         }
-        // TODO: fermer le reader
     }
 
-    // envoi messages
+    // envoi messages utilisateur vers le serveur
     private void sendMessages() {
+        BufferedWriter writer = null;
         try {
-            OutputStream outputStream = s.getOutputStream();
-            OutputStreamWriter osw = new OutputStreamWriter(outputStream);
-            BufferedWriter w = new BufferedWriter(osw);
-            lecteurConsole = new BufferedReader(new InputStreamReader(System.in));
-            String input;
-            while ((input = lecteurConsole.readLine()) != null) {
-                w.write(input);
-                w.newLine();
-                w.flush();
+            OutputStream outputStream = clientSocket.getOutputStream();
+            OutputStreamWriter outputStreamWriter = new OutputStreamWriter(outputStream);
+            writer = new BufferedWriter(new OutputStreamWriter(clientSocket.getOutputStream()));
+            consoleReader = new BufferedReader(new InputStreamReader(System.in));
+            String userInput;
+            while ((userInput = consoleReader.readLine()) != null) {
+                if (userInput.trim().isEmpty()) {
+                    continue;
+                }
+                writer.write(userInput);
+                writer.newLine();
+                writer.flush();
+                messageCount++;
                 System.out.print("You: ");
-                messageCount = messageCount + 1;
             }
         } catch (IOException e) {
-            System.out.println("Error: " + e.getMessage());
+            System.err.println("Error lors de l'envoi du message: " + e.getMessage());
+            throw new RuntimeException("Error lors de l'envoi du message: ", e);
+        } finally {
+            try {
+                writer.close();
+            } catch (IOException e) {
+                System.err.println("Error lors de l'envoi du message: " + e.getMessage());
+            }
         }
     }
 
-    // arrêt propre
+    // arrêt propre de la chat
     private void shutdown() throws IOException {
-        if (exec != null) {
-            exec.shutdown();
+        if (executorService != null) {
+            executorService.shutdown();
         }
-        if (s != null && !s.isClosed()) {
-            s.close();
+        if (clientSocket != null && !clientSocket.isClosed()) {
+            clientSocket.close();
         }
-    }
-
-    private String formatMessage(String msg) {
-        return msg.trim();
     }
 }

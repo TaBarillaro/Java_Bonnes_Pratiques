@@ -6,110 +6,206 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.commons.io.IOUtils;
-import com.google.common.collect.Lists;
 
 public class Server {
-    private int p;
-    private List<ClientHandler> _clientsList = new ArrayList<>();
-    private ServerSocket ss;
+    private static final int MAX_HISTORY = 100;
+    private static final int MAX_MESSAGE_LENGTH = 1024;
+    private static final int SOCKET_TIMEOUT_MS = 5000;
+
+    private final int port;
+    private final List<ClientHandler> clientsList = new ArrayList<>();
+    private ServerSocket serverSocket;
     private boolean isRunning = false;
-    private List<String> hist = new ArrayList<>();
+    private final List<String> history = new ArrayList<>();
     private int count = 0;
 
     public Server(int port) {
-        this.p = port;
+        this.port = port;
     }
 
+// Démarre le serveur et accepte les connexions des clients
     public void start() throws IOException {
-        ss = new ServerSocket();
-        ss.bind(new InetSocketAddress("0.0.0.0", p));
+        serverSocket = new ServerSocket();
+        serverSocket.bind(new InetSocketAddress("0.0.0.0", port));
         isRunning = true;
-        System.out.println("Chat server started on port " + p);
+        System.out.println("Chat server started on port " + port);
 
         while (isRunning) {
-            Socket cs = ss.accept();
-            ClientHandler ch = new ClientHandler(cs, this);
-            _clientsList.add(ch);
-            Thread t = new Thread(ch);
-            t.start();
-        }
-    }
-
-    public void stop() throws IOException {
-        isRunning = false;
-        if (ss != null && !ss.isClosed()) {
-            ss.close();
-        }
-    }
-
-    // méthode pour envoyer message à tout le monde
-    public void broadcastMessage(ClientHandler expediteur, String msg) {
-        hist.add(msg);
-        if (hist.size() > 100) {
-            hist.remove(0);
-        }
-
-        for (int i = 0; i < _clientsList.size(); i++) {
-            ClientHandler c = _clientsList.get(i);
-            if (c != expediteur && c.nomUtilisateur != null) {
-                try {
-                    c.out.println(msg);
-                } catch (Exception e) {
-                    // client déconnecté ?
+            try {
+                Socket clientSocket = serverSocket.accept();
+                ClientHandler clientHandler = new ClientHandler(clientSocket, this);
+                clientsList.add(clientHandler);
+                new Thread(clientHandler).start();
+            } catch (IOException e) {
+                if (isRunning) {
+                    System.err.println("Erreur lors de l'acceptation d'un client: " + e.getMessage());
                 }
             }
         }
     }
 
-    // envoi historique
-    public void sendHistoryToClient(ClientHandler c) {
-        for (int i = 0; i < hist.size(); i++) {
-            c.out.println(hist.get(i));
+    private void sendHistoryToClient(ClientHandler clientHandler) {
+        for (String message : history) {
+            clientHandler.sendMessage(message);
+        }
+    }
+
+    private void addToHistory(String message) {
+        history.add(message);
+        if (history.size() > MAX_HISTORY) {
+            history.remove(0);
+        }
+    }
+
+    // Arrête le serveur et ferme toutes les connexions
+    public void stop() throws IOException {
+        isRunning = false;
+        if (serverSocket != null && !serverSocket.isClosed()) {
+            serverSocket.close();
+        }
+    }
+
+    // méthode pour envoyer message à tout le monde
+    public void broadcastMessage(ClientHandler sender, String message) {
+        if (message == null || message.length() > MAX_MESSAGE_LENGTH) {
+            return;
+        }
+        addToHistory(message);
+
+        for (ClientHandler client : clientsList) {
+            if (client != sender && client.getUserName() != null) {
+                client.sendMessage(message);
+            }
         }
     }
 
     // Classe interne pour gérer chaque client
     class ClientHandler implements Runnable {
-        Socket s;
-        PrintWriter out;
-        String nomUtilisateur;
-        private int clientId;
+        private Socket socket;
+        private PrintWriter out;
+        private BufferedReader in;
+        private String userName;
+        private final int clientId;
 
         public ClientHandler(Socket socket, Server srv) {
-            this.s = socket;
+            this.socket = socket;
             this.clientId = count++;
         }
 
         public void run() {
             try {
-                InputStream in = s.getInputStream();
-                BufferedReader r = new BufferedReader(new InputStreamReader(in));
-                OutputStream outStream = s.getOutputStream();
-                out = new PrintWriter(new OutputStreamWriter(outStream), true);
+                initialiseStreams();
+                askUserName();
+                announceJoin();
+                Server.this.sendHistoryToClient(this);
 
-                out.println("Enter your name: ");
-                nomUtilisateur = r.readLine();
-                String m = nomUtilisateur + " has joined the chat.";
-                System.out.println(m);
-
-                sendHistoryToClient(this);
-                broadcastMessage(this, m);
-
-                String messageRecu;
-                while ((messageRecu = r.readLine()) != null) {
-                    m = nomUtilisateur + ": " + messageRecu;
-                    System.out.println(m);
-                    broadcastMessage(this, m);
-                }
-
-                String msgLeave = nomUtilisateur + " has left the chat.";
-                System.out.println(msgLeave);
-                broadcastMessage(this, msgLeave);
-
+                listenForMessages();
+                announceLeave();
             } catch (IOException e) {
-                System.out.println("Client error");
+                System.out.println("Client disconnected unexpectedly.");
+                if (userName != null) {
+                    try {
+                        announceLeave();
+                    } catch (IOException ex) {
+                        throw new RuntimeException(ex);
+                    }
+                }
+            } finally {
+                try {
+                    if (socket != null && !socket.isClosed()) socket.close();
+                } catch (IOException e) {
+                    System.err.println("Erreur lors de la fermeture du socket: " + e.getMessage());
+                }
             }
         }
+
+        // run sub-methodes
+        private void initialiseStreams() throws IOException {
+            in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream()), true);
+        }
+
+        private void askUserName() throws IOException {
+            out.println("Enter your name: ");
+            userName = in.readLine();
+            if (userName == null) {
+                out.println("Username invalid.");
+            }
+        }
+
+        private void announceJoin() throws IOException {
+            String  message =  userName + " a rejoint la conversation";
+            System.out.println(message);
+            broadcastMessage(this, message);
+        }
+
+        private void announceLeave() throws IOException {
+            String msg = userName + " a laissé la conversation.";
+            System.out.println(msg);
+            broadcastMessage(this, msg);
+        }
+
+        private void listenForMessages() throws IOException {
+            String messageInput;
+
+            while ((messageInput = in.readLine()) != null) {
+
+                if (messageInput.length() > MAX_MESSAGE_LENGTH) {
+                    sendMessage("[Server] Message too long. Ignored.");
+                    continue;
+                }
+
+                String formatted = userName + ": " + messageInput;
+                System.out.println(formatted);
+                broadcastMessage(this, formatted);
+            }
+        }
+
+        private void cleanUp() {
+            clientsList.remove(this);
+        }
+
+        private void sendMessage(String message) {
+            try {
+                out.println(message);
+            } catch (Exception e) {
+                System.out.println("Client deconnecté.");
+            }
+        }
+
+        public String getUserName() {
+            return userName;
+        }
+
+        private ServerSocket serverSocket;
+
+//                InputStream in = socket.getInputStream();
+//                BufferedReader r = new BufferedReader(new InputStreamReader(in));
+//                OutputStream outStream = socket.getOutputStream();
+//                out = new PrintWriter(new OutputStreamWriter(outStream), true);
+//
+//                out.println("Enter your name: ");
+//                userName = r.readLine();
+//                String message = userName + " has joined the chat.";
+//                System.out.println(message);
+//
+//                sendHistoryToClient(this);
+//                broadcastMessage(this, message);
+//
+//                String messageRecu;
+//                while ((messageRecu = r.readLine()) != null) {
+//                    message = userName + ": " + messageRecu;
+//                    System.out.println(message);
+//                    broadcastMessage(this, message);
+//                }
+//
+//                String msgLeave = userName + " has left the chat.";
+//                System.out.println(msgLeave);
+//                broadcastMessage(this, msgLeave);
+//
+//            } catch (IOException e) {
+//                System.out.println("Client error");
+//            }
+
     }
 }
