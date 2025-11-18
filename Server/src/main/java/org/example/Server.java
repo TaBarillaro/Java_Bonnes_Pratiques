@@ -5,15 +5,16 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class Server {
     private static final int MAX_HISTORY = 100;
     private static final int MAX_MESSAGE_LENGTH = 1024;
-    private static final int SOCKET_TIMEOUT_MS = 5000;
+    private static final int SOCKET_TIMEOUT_MS = 30000;
 
     private final int port;
-    private final List<ClientHandler> clientsList = new ArrayList<>();
+    private final List<ClientHandler> clientsList = Collections.synchronizedList(new ArrayList<>());
     private ServerSocket serverSocket;
     private boolean isRunning = false;
     private final List<String> history = new ArrayList<>();
@@ -27,12 +28,14 @@ public class Server {
     public void start() throws IOException {
         serverSocket = new ServerSocket();
         serverSocket.bind(new InetSocketAddress("0.0.0.0", port));
+        serverSocket.setSoTimeout(SOCKET_TIMEOUT_MS);
         isRunning = true;
         System.out.println("Chat server started on port " + port);
 
         while (isRunning) {
             try {
                 Socket clientSocket = serverSocket.accept();
+                clientSocket.setSoTimeout(SOCKET_TIMEOUT_MS);
                 ClientHandler clientHandler = new ClientHandler(clientSocket, this);
                 clientsList.add(clientHandler);
                 new Thread(clientHandler).start();
@@ -45,6 +48,7 @@ public class Server {
     }
 
     private void sendHistoryToClient(ClientHandler clientHandler) {
+        if (clientHandler == null) { return; }
         for (String message : history) {
             clientHandler.sendMessage(message);
         }
@@ -63,6 +67,12 @@ public class Server {
         if (serverSocket != null && !serverSocket.isClosed()) {
             serverSocket.close();
         }
+        synchronized (clientsList) {
+            for (ClientHandler clientHandler : clientsList) {
+                clientHandler.closeConnection();
+            }
+            clientsList.clear();
+        }
     }
 
     // méthode pour envoyer message à tout le monde
@@ -71,9 +81,9 @@ public class Server {
             return;
         }
         addToHistory(message);
-
-        for (ClientHandler client : clientsList) {
-            if (client != sender && client.getUserName() != null) {
+        // synchronisation de la liste
+        synchronized (clientsList) {
+            for (ClientHandler client : clientsList) {
                 client.sendMessage(message);
             }
         }
@@ -112,6 +122,7 @@ public class Server {
                 }
             } finally {
                 try {
+                    cleanUp();
                     if (socket != null && !socket.isClosed()) socket.close();
                 } catch (IOException e) {
                     System.err.println("Erreur lors de la fermeture du socket: " + e.getMessage());
@@ -176,6 +187,16 @@ public class Server {
 
         public String getUserName() {
             return userName;
+        }
+
+        public void closeConnection() {
+            try {
+                if (socket != null && !socket.isClosed()) {
+                    socket.close();
+                }
+            } catch (IOException e) {
+                System.err.println("Erreur lors de la fermeture du socket: " + e.getMessage());
+            }
         }
 
         private ServerSocket serverSocket;

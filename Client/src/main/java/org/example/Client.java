@@ -13,7 +13,8 @@ import java.util.concurrent.Future;
 public class Client {
     private static final int MAX_MESSAGE_LENGTH = 1024;
     private static final int THREAD_POOL_SIZE = 2;// Nombre de threads : un pour l'envoi, un pour la réception
-    private static final int CONNECTION_DELAY_MS = 100;  // Délai avant de lancer l'envoi après la réception
+    private static final int CONNECTION_DELAY_MS = 100;// Délai avant de lancer l'envoi après la réception
+    private static final int SOCKET_TIMEOUT_MS = 30000; // Timeout sur lo socket
 
     private String serverAddress;
     private int serverPort;
@@ -30,6 +31,7 @@ public class Client {
     // méthode pour se connecter au serveur et gérer l'envoi/réception
     public void connect() throws IOException, InterruptedException, ExecutionException {
         clientSocket = new Socket(serverAddress, serverPort);
+        clientSocket.setSoTimeout(SOCKET_TIMEOUT_MS); // Timeout ajouté pour éviter blocage
         executorService = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
 
         // Lancer un thread pour la réception des messages
@@ -49,6 +51,9 @@ public class Client {
 
     // reception des messages depuis le serveur et stamp
     private void receiveMessages() {
+        if (clientSocket == null) {
+            return;
+        }
         try {
             InputStream inputStream = clientSocket.getInputStream();
             InputStreamReader inputStreamReader = new InputStreamReader(inputStream);
