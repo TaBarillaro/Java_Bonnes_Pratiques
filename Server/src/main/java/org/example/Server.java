@@ -18,7 +18,7 @@ public class Server {
     private final List<ClientHandler> clientsList = Collections.synchronizedList(new ArrayList<>());
     private ServerSocket serverSocket;
     private boolean isRunning = false;
-    private final List<String> history = new ArrayList<>();
+    private final List<String> history = Collections.synchronizedList(new ArrayList<>());
     private int count = 0;
 
     public Server(int port) {
@@ -212,34 +212,5 @@ public class Server {
         }
 
         private ServerSocket serverSocket;
-
-//                InputStream in = socket.getInputStream();
-//                BufferedReader r = new BufferedReader(new InputStreamReader(in));
-//                OutputStream outStream = socket.getOutputStream();
-//                out = new PrintWriter(new OutputStreamWriter(outStream), true);
-//
-//                out.println("Enter your name: ");
-//                userName = r.readLine();
-//                String message = userName + " has joined the chat.";
-//                System.out.println(message);
-//
-//                sendHistoryToClient(this);
-//                broadcastMessage(this, message);
-//
-//                String messageRecu;
-//                while ((messageRecu = r.readLine()) != null) {
-//                    message = userName + ": " + messageRecu;
-//                    System.out.println(message);
-//                    broadcastMessage(this, message);
-//                }
-//
-//                String msgLeave = userName + " has left the chat.";
-//                System.out.println(msgLeave);
-//                broadcastMessage(this, msgLeave);
-//
-//            } catch (IOException e) {
-//                System.out.println("Client error");
-//            }
-
     }
 }
