@@ -12,6 +12,7 @@ public class Server {
     private static final int MAX_HISTORY = 100;
     private static final int MAX_MESSAGE_LENGTH = 1024;
     private static final int SOCKET_TIMEOUT_MS = 30000;
+    private static final int MAX_CONNECTIONS = 5;
 
     private final int port;
     private final List<ClientHandler> clientsList = Collections.synchronizedList(new ArrayList<>());
@@ -34,11 +35,19 @@ public class Server {
 
         while (isRunning) {
             try {
-                Socket clientSocket = serverSocket.accept();
-                clientSocket.setSoTimeout(SOCKET_TIMEOUT_MS);
-                ClientHandler clientHandler = new ClientHandler(clientSocket, this);
-                clientsList.add(clientHandler);
-                new Thread(clientHandler).start();
+                Socket clientSocket = serverSocket.accept() ;
+                synchronized (clientsList) {
+                    if (clientsList.size() >= MAX_CONNECTIONS) {
+                        PrintWriter tempOut = new PrintWriter(clientSocket.getOutputStream(), true);
+                        tempOut.println("Server full. Try again later.");
+                        clientSocket.close();
+                        continue;
+                    }
+                    clientSocket.setSoTimeout(SOCKET_TIMEOUT_MS);
+                    ClientHandler clientHandler = new ClientHandler(clientSocket, this);
+                    clientsList.add(clientHandler);
+                    new Thread(clientHandler).start();
+                }
             } catch (IOException e) {
                 if (isRunning) {
                     System.err.println("Erreur lors de l'acceptation d'un client: " + e.getMessage());
@@ -174,7 +183,9 @@ public class Server {
         }
 
         private void cleanUp() {
-            clientsList.remove(this);
+            synchronized (clientsList) {
+                clientsList.remove(this);
+            }
         }
 
         private void sendMessage(String message) {
