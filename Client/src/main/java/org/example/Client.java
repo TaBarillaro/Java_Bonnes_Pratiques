@@ -7,6 +7,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 
 // client TCP pour la communication avec le serveur
 // il gère la connexion, l'envoie et le reception des messages
@@ -19,9 +20,10 @@ public class Client {
     private String serverAddress;
     private int serverPort;
     private Socket clientSocket;
+    private final Object socketLock = new Object(); // lock pour proteger le socket
     private ExecutorService executorService;
     private BufferedReader consoleReader;
-    private int messageCount = 0;
+    private final AtomicInteger messageCount = new AtomicInteger(0);
 
     public Client(String serverAddress, int serverPort) {
         this.serverAddress = serverAddress;
@@ -64,8 +66,10 @@ public class Client {
                     System.err.println("Message trop long, ignoré.");
                     continue;
                 }
-                System.out.println("\r" + message);
-                System.out.print("You: ");
+                synchronized (System.out) {
+                    System.out.println("\r" + message);
+                    System.out.print("You: ");
+                }
             }
         } catch (SocketTimeoutException e) {
             System.err.println("Socket timed out."); // Timeout si le serveur ne répond pas
@@ -95,11 +99,12 @@ public class Client {
                 if (userInput.trim().isEmpty()) {
                     continue;
                 }
-                // Envoyer le message au serveur
-                writer.write(userInput);
-                writer.newLine();
-                writer.flush();
-                messageCount++;
+                synchronized (socketLock) { // protection socket pendant l'écriture
+                    writer.write(userInput);
+                    writer.newLine();
+                    writer.flush();
+                }
+                messageCount.incrementAndGet();
                 System.out.print("You: ");
             }
         } catch (IOException e) {
@@ -119,6 +124,11 @@ public class Client {
     private void shutdown() throws IOException {
         if (executorService != null) {
             executorService.shutdown(); // arret des threads
+        }
+        synchronized (socketLock) {
+            if (clientSocket != null && !clientSocket.isClosed()) {
+                clientSocket.close();
+            }
         }
         if (clientSocket != null && !clientSocket.isClosed()) {
             clientSocket.close(); // fermature du socket

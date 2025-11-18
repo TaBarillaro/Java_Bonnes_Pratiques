@@ -175,6 +175,7 @@ public class Server {
                     sendMessage("[Server] Message too long. Ignored.");
                     continue;
                 }
+                messageInput = messageInput.replaceAll("\\p{Cntrl}", "");
 
                 String formatted = userName + ": " + messageInput;
                 System.out.println(formatted);
