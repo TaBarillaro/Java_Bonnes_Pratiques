@@ -111,11 +111,13 @@ public class Client {
             System.err.println("Error lors de l'envoi du message: " + e.getMessage());
             throw new RuntimeException("Error lors de l'envoi du message: ", e);
         } finally {
-            // Fermeture du writer pour libérer les ressources
-            try {
-                writer.close();
-            } catch (IOException e) {
-                System.err.println("Error lors de l'envoi du message: " + e.getMessage());
+            if (writer != null) {
+                // Fermeture du writer pour libérer les ressources
+                try {
+                    writer.close();
+                } catch (IOException e) {
+                    System.err.println("Error lors de l'envoi du message: " + e.getMessage());
+                }
             }
         }
     }
