@@ -11,10 +11,9 @@ import java.util.concurrent.Future;
 // client TCP pour la communication avec le serveur
 // il gère la connexion, l'envoie et le reception des messages
 public class Client {
-    private static final int DEFAULT_SOCKET_TIMEOUT_MS = 5000;
     private static final int MAX_MESSAGE_LENGTH = 1024;
-    private static final int THREAD_POOL_SIZE = 2;
-    private static final int CONNECTION_DELAY_MS = 100;
+    private static final int THREAD_POOL_SIZE = 2;// Nombre de threads : un pour l'envoi, un pour la réception
+    private static final int CONNECTION_DELAY_MS = 100;  // Délai avant de lancer l'envoi après la réception
 
     private String serverAddress;
     private int serverPort;
@@ -28,19 +27,23 @@ public class Client {
         this.serverPort = serverPort;
     }
 
-    // méthode pour se connecter au serveur
+    // méthode pour se connecter au serveur et gérer l'envoi/réception
     public void connect() throws IOException, InterruptedException, ExecutionException {
         clientSocket = new Socket(serverAddress, serverPort);
-//        clientSocket.setSoTimeout(DEFAULT_SOCKET_TIMEOUT_MS);
         executorService = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
 
+        // Lancer un thread pour la réception des messages
         Future<?> receiveTask  = executorService.submit(this::receiveMessages);
+        // Petit délai pour laisser le thread de réception s'initialiser
         Thread.sleep(CONNECTION_DELAY_MS);
+        // Lancer un thread pour l'envoi des messages
         Future<?> sendTask  = executorService.submit(this::sendMessages);
 
+        // Attendre que les threads se terminent (bloquant)
         receiveTask.get();
         sendTask.get();
 
+        // Fermeture propre du client
         shutdown();
     }
 
@@ -60,11 +63,12 @@ public class Client {
                 System.out.print("You: ");
             }
         } catch (SocketTimeoutException e) {
-            System.err.println("Socket timed out.");
+            System.err.println("Socket timed out."); // Timeout si le serveur ne répond pas
         } catch (IOException e) {
             System.err.println("Déconnexion du serveur: " + e.getMessage());
             throw new RuntimeException("Erreur de réception des messages", e);
         } finally {
+            // Fermeture du socket à la fin de la réception
             try {
                 clientSocket.close();
             } catch (IOException e) {
@@ -86,6 +90,7 @@ public class Client {
                 if (userInput.trim().isEmpty()) {
                     continue;
                 }
+                // Envoyer le message au serveur
                 writer.write(userInput);
                 writer.newLine();
                 writer.flush();
@@ -96,6 +101,7 @@ public class Client {
             System.err.println("Error lors de l'envoi du message: " + e.getMessage());
             throw new RuntimeException("Error lors de l'envoi du message: ", e);
         } finally {
+            // Fermeture du writer pour libérer les ressources
             try {
                 writer.close();
             } catch (IOException e) {
@@ -107,10 +113,10 @@ public class Client {
     // arrêt propre de la chat
     private void shutdown() throws IOException {
         if (executorService != null) {
-            executorService.shutdown();
+            executorService.shutdown(); // arret des threads
         }
         if (clientSocket != null && !clientSocket.isClosed()) {
-            clientSocket.close();
+            clientSocket.close(); // fermature du socket
         }
     }
 }
