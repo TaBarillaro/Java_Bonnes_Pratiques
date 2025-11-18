@@ -31,7 +31,7 @@ public class Client {
     // méthode pour se connecter au serveur
     public void connect() throws IOException, InterruptedException, ExecutionException {
         clientSocket = new Socket(serverAddress, serverPort);
-        clientSocket.setSoTimeout(DEFAULT_SOCKET_TIMEOUT_MS);
+//        clientSocket.setSoTimeout(DEFAULT_SOCKET_TIMEOUT_MS);
         executorService = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
 
         Future<?> receiveTask  = executorService.submit(this::receiveMessages);

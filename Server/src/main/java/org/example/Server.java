@@ -128,8 +128,9 @@ public class Server {
         private void askUserName() throws IOException {
             out.println("Enter your name: ");
             userName = in.readLine();
-            if (userName == null) {
+            if (userName == null || userName.trim().isEmpty()) {
                 out.println("Username invalid.");
+                throw new IOException("Username invalid.");
             }
         }
 
